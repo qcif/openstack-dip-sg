@@ -22,14 +22,23 @@ EXE=$(basename "$0" .sh)
 EXE_EXT=$(basename "$0")
 EXE_DIR=$(cd "$(dirname "$0")"; pwd)
 
+#----------------
 # Defaults
 
+# Name of the security groups
 DEFAULT_SECURITY_GROUP_NAME="User: $(id -u -n -r) Home"
 
+# Description to use for the created rules
+DESCRIPTION="Created by $PROGRAM $VERSION"
+
+# Ports to use: port names can be used for some protocols (case insensitive)
+# Find lowercase 'ssh' in this script, to see supported names.
 DEFAULT_TCP_PORTS=SSH,HTTP,HTTPS
 
+# Output from running `openstack security group rule create` are written here
 DEFAULT_OUT_FILE=/dev/null
 
+# The STUN server to use. Change to a more local STUN server, if you have one.
 DEFAULT_STUN_SERVER=stun.stunprotocol.org
 
 #----------------
@@ -52,12 +61,12 @@ DEFAULT_LOG_FILE="$HOME/.cache/$PROGRAM/ip-address.log"
 
 # Control how many entries to keep in the log file.
 #
-# Empty value means keep only the last entry, so the file does not
-# keep growing. A non-empty value keeps appending entries to the file.
+# Only keep the last entry, if value is empty. This may be useful so
+# the file does not keep growing in size. Keeps appending entries to
+# the file, if value is non-empty.
 
 #FULL_LOG=
 FULL_LOG=yes
-
 
 #----------------------------------------------------------------
 # Bash strict mode: http://redsymbol.net/articles/unofficial-bash-strict-mode/
@@ -81,131 +90,135 @@ SECURITY_GROUP_NAME="$DEFAULT_SECURITY_GROUP_NAME"
 RC_FILE_SRC=
 PASSWORD_FILE=
 TCP_PORTS=
-NO_ICMP=
+NO_ALL_ICMP=
 OUT_FILE=/dev/null
 FORCE=
 STUN_SERVER="$DEFAULT_STUN_SERVER"
 LOG_FILE="$DEFAULT_LOG_FILE"
 IP_ADDRESS=
 
-SHOW_VERSION=
-SHOW_HELP=
+process_command_line() {
+  local SHOW_VERSION
+  local SHOW_HELP
 
-while [ $# -gt 0 ]; do
-  case "$1" in
-    -s|--security-group)
-      if [ $# -lt 2 ]; then
-        echo "$EXE: usage error: missing argument for $1" >&2
+  SHOW_VERSION=
+  SHOW_HELP=
+
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -s|--security-group)
+        if [ $# -lt 2 ]; then
+          echo "$EXE: usage error: missing argument for $1" >&2
+          exit 2
+        fi
+        SECURITY_GROUP_NAME="$2"
+        shift
+        ;;
+
+      -r|--rc)
+        if [ $# -lt 2 ]; then
+          echo "$EXE: usage error: missing argument for $1" >&2
+          exit 2
+        fi
+        RC_FILE_SRC="$2"
+        shift
+        ;;
+
+      -y|--password)
+        if [ $# -lt 2 ]; then
+          echo "$EXE: usage error: missing argument for $1" >&2
+          exit 2
+        fi
+        PASSWORD_FILE="$2"
+        shift
+        ;;
+
+      -o|--output)
+        if [ $# -lt 2 ]; then
+          echo "$EXE: usage error: missing argument for $1" >&2
+          exit 2
+        fi
+        OUT_FILE="$DEFAULT_OUT_FILE"
+        shift
+        ;;
+
+      -p|--port|--ports)
+        if [ $# -lt 2 ]; then
+          echo "$EXE: usage error: missing argument for $1" >&2
+          exit 2
+        fi
+        TCP_PORTS="$TCP_PORTS $2"
+        shift
+        ;;
+
+      -f|--force)
+        FORCE=yes
+        ;;
+
+      -S|--stun)
+        if [ $# -lt 2 ]; then
+          echo "$EXE: usage error: missing argument for $1" >&2
+          exit 2
+        fi
+        STUN_SERVER="$2"
+        shift
+        ;;
+
+      -l|--log)
+        if [ $# -lt 2 ]; then
+          echo "$EXE: usage error: missing argument for $1" >&2
+          exit 2
+        fi
+        LOG_FILE="$2"
+        shift
+        ;;
+
+      --no-all-icmp)
+        NO_ALL_ICMP=yes
+        ;;
+
+      --version)
+        SHOW_VERSION=yes
+        ;;
+
+      -h|--help)
+        SHOW_HELP=yes
+        ;;
+
+      -*)
+        echo "$EXE: usage error: unknown option: $1" >&2
         exit 2
-      fi
-      SECURITY_GROUP_NAME="$2"
-      shift
-      ;;
+        ;;
+      *)
+        if [ -n "$IP_ADDRESS" ]; then
+          echo "$EXE:  usage error: too many arguments" >&2
+          exit 2
+        fi
+        IP_ADDRESS="$1"
+        ;;
+    esac
 
-    -r|--rc)
-      if [ $# -lt 2 ]; then
-        echo "$EXE: usage error: missing argument for $1" >&2
-        exit 2
-      fi
-      RC_FILE_SRC="$2"
-      shift
-      ;;
+    shift
+  done
 
-    -y|--password)
-      if [ $# -lt 2 ]; then
-        echo "$EXE: usage error: missing argument for $1" >&2
-        exit 2
-      fi
-      PASSWORD_FILE="$2"
-      shift
-      ;;
+  #----------------
+  # Help
 
-    -o|--output)
-      if [ $# -lt 2 ]; then
-        echo "$EXE: usage error: missing argument for $1" >&2
-        exit 2
-      fi
-      OUT_FILE="$DEFAULT_OUT_FILE"
-      shift
-      ;;
+  if [ -n "$SHOW_HELP" ]; then
+    if [ -n "$FULL_LOG" ]; then
+      LOG_HELP_TEXT='log file with only the most recent IP address'
+    else
+      LOG_HELP_TEXT='log file with all the IP addresses'
+    fi
 
-    -p|--port|--ports)
-      if [ $# -lt 2 ]; then
-        echo "$EXE: usage error: missing argument for $1" >&2
-        exit 2
-      fi
-      TCP_PORTS="$TCP_PORTS $2"
-      shift
-      ;;
-
-    -f|--force)
-      FORCE=yes
-      ;;
-
-    -S|--stun)
-      if [ $# -lt 2 ]; then
-        echo "$EXE: usage error: missing argument for $1" >&2
-        exit 2
-      fi
-      STUN_SERVER="$2"
-      shift
-      ;;
-
-    -l|--log)
-      if [ $# -lt 2 ]; then
-        echo "$EXE: usage error: missing argument for $1" >&2
-        exit 2
-      fi
-      LOG_FILE="$2"
-      shift
-      ;;
-
-    --no-icmp)
-      NO_ICMP=yes
-      ;;
-
-    --version)
-      SHOW_VERSION=yes
-      ;;
-
-    -h|--help)
-      SHOW_HELP=yes
-      ;;
-
-    -*)
-      echo "$EXE: usage error: unknown option: $1" >&2
-      exit 2
-      ;;
-    *)
-      if [ -n "$IP_ADDRESS" ]; then
-        echo "$EXE:  usage error: too many arguments" >&2
-        exit 2
-      fi
-      IP_ADDRESS="$1"
-      ;;
-  esac
-
-  shift
-done
-
-#----------------
-# Help
-
-if [ -n "$SHOW_HELP" ]; then
-  if [ -n "$FULL_LOG" ]; then
-    LOG_HELP_TEXT='log file with only the most recent IP address'
-  else
-    LOG_HELP_TEXT='log file with all the IP addresses'
-  fi
-
-  cat <<EOF
+    cat <<EOF
 Usage: $EXE_EXT [options] [IP_ADDRESS]
 Options:
   -s|--security-group NAME  security group (default: "$DEFAULT_SECURITY_GROUP_NAME")
   -r|--rc PROJECT_SRC       projects with the security group to configure
   -y|--password FILE        read OpenStack password from a file
   -p|--port PORT_NUM        add rules for ingress to these TCP/IP port numbers
-     --no-icmp              do not add rule for all ICMP (default: add rule)
+     --no-all-icmp          do not add rule for All ICMP (default: add rule)
   -o|--output FILE          openstack output (default: $DEFAULT_OUT_FILE)
   -f|--force                replace rules when detected IP address is unchanged
   -S|--stun SERVER          STUN server (default: $DEFAULT_STUN_SERVER)
@@ -217,6 +230,7 @@ Options:
 IP_ADDRESS:
   IPv4 address for new ingress rules.
   Will try to automatically detect it, if it is not provided.
+  Value of "none" will delete all rules without creating any new ones.
 
 PROJECT_SRC:
   Either a single OpenStack RC file or a directory containing *-openrc.sh files
@@ -228,102 +242,112 @@ PORT_NUM:
   or comma separate the port numbers (e.g. -p 22,80,443).
   Default: $DEFAULT_TCP_PORTS
 EOF
-  exit 0
-fi
+    exit 0
+  fi
 
-#----------------
-# Version
+  #----------------
+  # Version
 
-if [ -n "$SHOW_VERSION" ]; then
-  echo "$PROGRAM $VERSION"
-  exit 0
-fi
+  if [ -n "$SHOW_VERSION" ]; then
+    echo "$PROGRAM $VERSION"
+    exit 0
+  fi
 
-#----------------
-# Password
+  #----------------
+  # Password
 
-if [ -n "$PASSWORD_FILE" ]; then
-  OS_PASSWORD="$(head -n 1 "$PASSWORD_FILE")"
-fi
+  if [ -n "$PASSWORD_FILE" ]; then
+    OS_PASSWORD="$(head -n 1 "$PASSWORD_FILE")"
+  fi
 
-#----------------
-# TCP/IP ports
+  #----------------
+  # TCP/IP ports
 
-if [ -n "$TCP_PORTS" ]; then
-  _PORTS="$TCP_PORTS"
-else
-  _PORTS="$DEFAULT_TCP_PORTS"
-fi
+  if [ -n "$TCP_PORTS" ]; then
+    _PORTS="$TCP_PORTS"
+  else
+    _PORTS="$DEFAULT_TCP_PORTS"
+  fi
 
-# Check values and convert to a list of integer port numbers
+  # Check values and convert to a list of integer port numbers
 
-TCP_PORTS=
-for _P in $(echo $_PORTS | tr ',' ' '); do
-  P=$(echo "$_P" | tr '[:upper:]' '[:lower:]') # make lowercase
+  TCP_PORTS=
+  for _P in $(echo $_PORTS | tr ',' ' '); do
+    P=$(echo "$_P" | tr '[:upper:]' '[:lower:]') # make lowercase
 
-  if echo "$P" | grep -qE '^[0-9]+$' ; then
-    # Numeric port
-    if [ "$P" -lt 1 ] || [ "$P" -gt 65535 ]; then
-      echo "$EXE: usage error: port number out of range: $P" >&2
+    if echo "$P" | grep -qE '^[0-9]+$' ; then
+      # Numeric port
+      if [ "$P" -lt 1 ] || [ "$P" -gt 65535 ]; then
+        echo "$EXE: usage error: port number out of range: $P" >&2
+        exit 2
+      fi
+      NUM=$P
+    elif [ "$P" = 'ssh' ]; then
+      NUM=22
+    elif [ "$P" = 'http' ]; then
+      NUM=80
+    elif [ "$P" = 'https' ]; then
+      NUM=443
+    elif [ "$P" = 'squid' ]; then
+      NUM=3128
+    elif [ "$P" = 'mysql' ]; then
+      NUM=3306
+    elif [ "$P" = 'postgresql' ]; then
+      NUM=5432
+    elif [ "$P" = 'rdp' ]; then
+      NUM=3389
+    else
+      echo "$EXE: usage error: unrecognised port: $P" >&2
       exit 2
     fi
-    NUM=$P
-  elif [ "$P" = 'ssh' ]; then
-    NUM=22
-  elif [ "$P" = 'http' ]; then
-    NUM=80
-  elif [ "$P" = 'https' ]; then
-    NUM=443
-  elif [ "$P" = 'squid' ]; then
-    NUM=3128
-  elif [ "$P" = 'mysql' ]; then
-    NUM=3306
-  elif [ "$P" = 'rdp' ]; then
-    NUM=3389
-  else
-    echo "$EXE: usage error: unrecognised port: $P" >&2
-    exit 2
+
+    TCP_PORTS="$TCP_PORTS $NUM"
+  done
+
+  #----------------
+  # IP address
+
+  FROM_STUN=
+
+  if [ -z "$IP_ADDRESS" ] && [ -n "$STUN_SERVER" ]; then
+    # No IP address provided
+
+    if which stunclient >/dev/null; then
+      # Stuntman available: try to automatically determine public IP address
+      # http://www.stunprotocol.org
+      # https://en.wikipedia.org/wiki/STUN
+
+      IP_ADDRESS=$(stunclient "$STUN_SERVER" \
+                     | awk -F': *' '/^Mapped address:/{print $2}')
+      FROM_STUN=yes
+
+    else
+      # No IP address and cannot automatically determine it
+      echo "$EXE: \"stunclient\" command not found <http://www.stunprotocol.org>" >&2
+      echo "$EXE: so an IP address must be provided (-h for help)" >&2
+      exit 2
+    fi
   fi
 
-  TCP_PORTS="$TCP_PORTS $NUM"
-done
+  if [ "$IP_ADDRESS" != 'none' ]; then
+    if ! echo "$IP_ADDRESS" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+      echo "$EXE: usage error: not an IPv4 address: $IP_ADDRESS" >&2
+      exit 1
+    fi
 
-#----------------
-# IP address
-
-FROM_STUN=
-
-if [ -z "$IP_ADDRESS" ] && [ -n "$STUN_SERVER" ]; then
-  # No IP address provided
-
-  if which stunclient >/dev/null; then
-    # Stuntman available: try to automatically determine public IP address
-    # http://www.stunprotocol.org
-    # https://en.wikipedia.org/wiki/STUN
-
-    IP_ADDRESS=$(stunclient "$STUN_SERVER" \
-                   | awk -F': *' '/^Mapped address:/{print $2}')
-    FROM_STUN=yes
-
-  else
-    # No IP address and cannot automatically determine it
-    echo "$EXE: \"stunclient\" command not found <http://www.stunprotocol.org>" >&2
-    echo "$EXE: so an IP address must be provided (-h for help)" >&2
-    exit 2
+    if [ "$IP_ADDRESS" = '0.0.0.0/32' ]; then
+      echo "$EXE: error: not using an untargeted IP address" >&2
+      exit 1
+    fi
   fi
-fi
-
-if ! echo "$IP_ADDRESS" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
-  echo "$EXE: usage error: not an IPv4 address: $IP_ADDRESS" >&2
-  exit 1
-fi
+}
 
 #----------------------------------------------------------------
 
 NUM_GROUPS_UPDATED=0
 
 set_rules() {
-  local NEW_IP=$1
+  local _NEW_IP=$1
 
   # Debug: show the existing rules
   # openstack security group rule list "$SECURITY_GROUP_NAME"
@@ -332,64 +356,64 @@ set_rules() {
   #
   # Expecting all rules are for ingress from one IP address
 
-  local FOUND_SG=
-  local OLD_ADDR=
-  local IDS=
+  local _FOUND_SG=
+  local _OLD_ADDR=
+  local _IDS=
 
   for ROW in $(openstack security group rule list "$SECURITY_GROUP_NAME" \
                          -f csv --quote minimal \
-                         -c 'ID' -c 'IP Range' -c 'Direction'); do
-    local ID
-    local ADDR
-    local DIR
+                         -c 'ID' -c 'IP Range' -c 'Direction' 2>/dev/null); do
+    local _ID
+    local _ADDR
+    local _DIR
 
-    ID=$(echo "$ROW" | awk -F, '{print $1}')
-    ADDR=$(echo "$ROW" | awk -F, '{print $2}')
-    DIR=$(echo "$ROW" | awk -F, '{print $3}')
+    _ID=$(echo "$ROW" | awk -F, '{print $1}')
+    _ADDR=$(echo "$ROW" | awk -F, '{print $2}')
+    _DIR=$(echo "$ROW" | awk -F, '{print $3}')
 
-    if [ "$ID" = 'ID' ]; then
-      FOUND_SG=yes
+    if [ "$_ID" = 'ID' ]; then
+      _FOUND_SG=yes
       continue; # skip the header row
     fi
-    if [ "$ID" = 'Range' ]; then
+    if [ "$_ID" = 'Range' ]; then
       # This should not happen, but it does
       continue; # skip the header row
     fi
 
-    IDS="$IDS $ID"
+    _IDS="$_IDS $_ID"
 
-    if [ "$DIR" != 'ingress' ]; then
-      echo "$EXE: error: non-ingress rule found: $DIR $ADDR" >&2
-      echo "$EXE: $SECURITY_GROUP_NAME in $OS_PROJECT_NAME: skipped" >&2
+    if [ "$_DIR" != 'ingress' ]; then
+      echo "$EXE: error: non-ingress rule found: $_DIR $_ADDR" >&2
+      echo "$EXE: \"$SECURITY_GROUP_NAME\" in $OS_PROJECT_NAME: skipped" >&2
       return
     fi
 
-    if [ -z "$OLD_ADDR" ]; then
-      OLD_ADDR=$ADDR
+    if [ -z "$_OLD_ADDR" ]; then
+      _OLD_ADDR=$_ADDR
     else
-      if [ "$ADDR" != "$OLD_ADDR" ]; then
-        echo "$EXE: error: rules from multiple address found: $ADDR != $OLD_ADDR" >&2
-        echo "$EXE: $SECURITY_GROUP_NAME in $OS_PROJECT_NAME: skipped" >&2
+      if [ "$_ADDR" != "$_OLD_ADDR" ]; then
+        echo "$EXE: error: rules from multiple address found: $_ADDR != $_OLD_ADDR" >&2
+        echo "$EXE: \"$SECURITY_GROUP_NAME\" in $OS_PROJECT_NAME: skipped" >&2
         return
       fi
     fi
   done
 
-  if [ -z "$FOUND_SG" ]; then
-    echo "$EXE: warning: $OS_PROJECT_NAME: security group not found: $SECURITY_GROUP_NAME" >&2
-    echo "$EXE: $OS_PROJECT_NAME: skipped" >&2
+  if [ -z "$_FOUND_SG" ]; then
+    echo "$EXE: warning: $OS_PROJECT_NAME: security group not found: \"$SECURITY_GROUP_NAME\"" >&2
+    echo "$EXE: warning: $OS_PROJECT_NAME: project skipped" >&2
     return
   fi
 
-  if [ -z "$IDS" ]; then
+  if [ -z "$_IDS" ]; then
     echo "$EXE: warning: $OS_PROJECT_NAME: no existing rules were in the security group" >&2
   fi
 
-  if [ -n "$OLD_ADDR" ]; then
-    if ! echo "$OLD_ADDR" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/32$' ;
+  if [ -n "$_OLD_ADDR" ]; then
+    if ! echo "$_OLD_ADDR" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/32$' ;
     then
-      echo "$EXE: error: rules with IP range found: $OLD_ADDR" >&2
-      echo "$EXE: $SECURITY_GROUP_NAME in $OS_PROJECT_NAME: skipped" >&2
+      echo "$EXE: error: rules with IP range found: $_OLD_ADDR" >&2
+      echo "$EXE: \"$SECURITY_GROUP_NAME\" in $OS_PROJECT_NAME: skipped" >&2
       return
     fi
   fi
@@ -398,36 +422,42 @@ set_rules() {
 
   echo "$EXE: $OS_PROJECT_NAME: deleting rules from \"$SECURITY_GROUP_NAME\""
 
-  for ID in $IDS; do
-    openstack security group rule delete "$ID"
+  for _ID in $_IDS; do
+    openstack security group rule delete "$_ID"
   done
 
-  # Create new rule for ICMP
+  if [ "$_NEW_IP" != 'none' ]; then
+    # Create rules
 
-  if [ -n "$NO_ICMP" ]; then
-    echo "$EXE: $OS_PROJECT_NAME: creating rule: ingress all ICMP"
+    # Create new rule for All ICMP
 
-    openstack security group rule create \
-              --ingress \
-              --protocol ICMP \
-              --remote-ip "$NEW_IP" \
-              "$SECURITY_GROUP_NAME" \
-              >> "$OUT_FILE"
+    if [ -z "$NO_ALL_ICMP" ]; then
+      echo "$EXE: $OS_PROJECT_NAME: creating ingress rule: all ICMP"
+
+      openstack security group rule create \
+                --ingress \
+                --protocol ICMP \
+                --remote-ip "$_NEW_IP" \
+                --description "$DESCRIPTION" \
+                "$SECURITY_GROUP_NAME" \
+                >> "$OUT_FILE"
+    fi
+
+    # Create new rules for the TCP/IP ports
+
+    local _TCP_PORT
+    for _TCP_PORT in $TCP_PORTS; do
+      echo "$EXE: $OS_PROJECT_NAME: creating ingress rule: TCP port $_TCP_PORT"
+
+      openstack security group rule create \
+                --ingress \
+                --protocol TCP \
+                --remote-ip "$_NEW_IP" --dst-port "$_TCP_PORT" \
+                --description "$DESCRIPTION" \
+                "$SECURITY_GROUP_NAME" \
+                >> "$OUT_FILE"
+    done
   fi
-
-  # Create new rules for the TCP/IP ports
-
-  for TCP_PORT in $TCP_PORTS; do
-    echo "$EXE: $OS_PROJECT_NAME: creating rule: ingress TCP port $TCP_PORT"
-
-    openstack security group rule create \
-              --ingress \
-              --protocol TCP \
-              --remote-ip "$NEW_IP" --dst-port "$TCP_PORT" \
-              "$SECURITY_GROUP_NAME" \
-              >> "$OUT_FILE"
-
-  done
 
   NUM_GROUPS_UPDATED=$((NUM_GROUPS_UPDATED + 1))
 }
@@ -450,10 +480,10 @@ configure_project_sourced() {
 #----------------------------------------------------------------
 
 configure_project_from_rc_file() {
-  local RC_FILE="$1"
+  local _RC_FILE="$1"
 
-  if [ ! -f "$RC_FILE" ]; then
-    echo "$EXE: error: not a file: $RC_FILE" >&2
+  if [ ! -f "$_RC_FILE" ]; then
+    echo "$EXE: error: not a file: $_RC_FILE" >&2
     exit 1
   fi
 
@@ -463,7 +493,7 @@ configure_project_from_rc_file() {
   touch $TMP_RC
   chmod 600 $TMP_RC
 
-  grep -v 'read -sr OS_PASSWORD_INPUT' "$RC_FILE" \
+  grep -v 'read -sr OS_PASSWORD_INPUT' "$_RC_FILE" \
     | grep -v 'Please enter your OpenStack Password' \
            > $TMP_RC
 
@@ -485,19 +515,19 @@ configure_project_from_rc_file() {
   # Check expected environment variables were set by the Openstack RC file
 
   if [ -z "$OS_USERNAME" ]; then
-    echo "$EXE: error: rc file did not set OS_USERNAME: $RC_FILE" >&2
+    echo "$EXE: error: rc file did not set OS_USERNAME: $_RC_FILE" >&2
     exit 1
   fi
   if [ -z "$OS_PROJECT_ID" ]; then
-    echo "$EXE: error: rc file did not set OS_PROJECT_ID: $RC_FILE" >&2
+    echo "$EXE: error: rc file did not set OS_PROJECT_ID: $_RC_FILE" >&2
     exit 1
   fi
   if [ -z "$OS_PROJECT_NAME" ]; then
-    echo "$EXE: error: rc file did not set OS_PROJECT_NAME: $RC_FILE" >&2
+    echo "$EXE: error: rc file did not set OS_PROJECT_NAME: $_RC_FILE" >&2
     exit 1
   fi
   if [ -z "$OS_AUTH_URL" ]; then
-    echo "$EXE: error: rc file did not set OS_AUTH_URL: $RC_FILE" >&2
+    echo "$EXE: error: rc file did not set OS_AUTH_URL: $_RC_FILE" >&2
     exit 1
   fi
 
@@ -509,22 +539,24 @@ configure_project_from_rc_file() {
 #----------------------------------------------------------------
 
 configure_projects_from_dir() {
-  local DIR="$1"
+  local _DIR="$1"
 
-  if [ ! -d "$DIR" ]; then
-    echo "$EXE: error: not a directory: $DIR" >&2
+  if [ ! -d "$_DIR" ]; then
+    echo "$EXE: error: not a directory: $_DIR" >&2
     exit 1
   fi
 
-  FOUND=
-  for RC_FILE in "$DIR"/*-openrc.sh; do
-    FOUND=yes
+  local _RC_FILE
+  local _FOUND
 
-    configure_project_from_rc_file "$RC_FILE"
+  for _RC_FILE in "$_DIR"/*-openrc.sh; do
+    _FOUND=yes
+
+    configure_project_from_rc_file "$_RC_FILE"
   done
 
-  if [ -z "$FOUND" ]; then
-    echo "$EXE: error: no *-openrc.sh files in directory: $DIR" >&2
+  if [ -z "$_FOUND" ]; then
+    echo "$EXE: error: no *-openrc.sh files in directory: $_DIR" >&2
     exit 1
   fi
 }
@@ -552,15 +584,24 @@ get_password() {
 
 #----------------------------------------------------------------
 # Functions for using the log file
+#
+# Except for the header in the first few lines, entries in the log
+# file contains three fields separated by ": ":
+#
+# YYYY-MM-DDTHH:MM:SS+HHMM: FROM: nnn.nnn.nnn.nnn
+#
+# Where "FROM" is either "STUN" or "manual", depending on if the IP
+# address was obtained using the STUN protocol or specified as a
+# command line argument.
 
 ip_has_changed() {
   if [ -n "$LOG_FILE" ] && [ -e "$LOG_FILE" ]; then
     # Try to check against the last entry in the log file
 
-    local OLD_IP
-    OLD_IP=$(tail -n 1 "$LOG_FILE" | awk -F': ' '{print $3}')
+    local _OLD_IP
+    _OLD_IP=$(tail -n 1 "$LOG_FILE" | awk -F': ' '{print $3}')
 
-    if [ "$IP_ADDRESS" = "$OLD_IP" ]; then
+    if [ "$IP_ADDRESS" = "$_OLD_IP" ]; then
       return 1 # unchanged
     fi
   fi
@@ -578,11 +619,11 @@ ip_save_log() {
     return
   fi
 
-  local LOG_DIR
-  LOG_DIR="$(dirname "$LOG_FILE")"
-  if [ ! -d "$LOG_DIR" ]; then
+  local _LOG_DIR
+  _LOG_DIR="$(dirname "$LOG_FILE")"
+  if [ ! -d "$_LOG_DIR" ]; then
     # Make sure directory exists
-    mkdir -p "$LOG_DIR"
+    mkdir -p "$_LOG_DIR"
   fi
 
   # Populate the file
@@ -593,57 +634,75 @@ ip_save_log() {
     echo "# $EXE_DIR/$EXE_EXT" >> "$LOG_FILE"
   fi
 
-  local SRC
+  local _SRC
   if [ -n "$FROM_STUN" ]; then
-    SRC=STUN
+    _SRC=STUN
   else
-    SRC=manual
+    _SRC=manual
   fi
 
-  echo "$(date '+%FT%T%z'): $SRC: $IP_ADDRESS" >> "$LOG_FILE" # append
+  echo "$(date '+%FT%T%z'): $_SRC: $IP_ADDRESS" >> "$LOG_FILE" # append
 }
 
 #----------------------------------------------------------------
 # Main
 
-if ! which openstack >/dev/null; then
-  echo "$EXE: error: \"openstack\" command not found" >&2
-  exit 1
-fi
+main() {
+  process_command_line "$@"
 
-if [ -z "$FORCE" ] && ! ip_has_changed; then
-  echo "$EXE: IP address unchanged ($IP_ADDRESS): no update (-f to force)" >&2
-  exit 0
-fi
+  # Check for openstack command line client
 
-if [ -n "$RC_FILE_SRC" ]; then
-
-  if [ -f "$RC_FILE_SRC" ]; then
-    get_password
-    configure_project_from_rc_file "$RC_FILE_SRC"
-  elif [ -d "$RC_FILE_SRC" ]; then
-    get_password
-    configure_projects_from_dir "$RC_FILE_SRC"
-  else
-    echo "$EXE: error: not a file or directory: $RC_FILE_SRC" >&2
+  if ! which openstack >/dev/null; then
+    echo "$EXE: error: \"openstack\" command not found" >&2
     exit 1
   fi
 
-elif [ ! -z "${OS_PROJECT_NAME+x}" ]; then
-#elif [ -n "$OS_PROJECT_NAME" ]; then
-  # Configure the project whose OpenStack RC file has already been sourced
+  # Check if update needs to be performed
 
-  get_password
-  configure_project_sourced
+  if [ -z "$FORCE" ] && ! ip_has_changed; then
+    echo "$EXE: IP address unchanged ($IP_ADDRESS): no update (-f to force)" >&2
+    exit 0
+  fi
 
-else
-  # No project to configure
-  echo "$EXE: error: no project (use --rc or source an OpenStack RC file)" >&2
-  exit 1
-fi
+  # Process projects
 
-if [ $NUM_GROUPS_UPDATED -gt 0 ]; then
-  ip_save_log
-fi
+  if [ -n "$RC_FILE_SRC" ]; then
+
+    if [ -f "$RC_FILE_SRC" ]; then
+      # Single project RC file
+      get_password
+      configure_project_from_rc_file "$RC_FILE_SRC"
+    elif [ -d "$RC_FILE_SRC" ]; then
+      # Project RC files from a directory
+      get_password
+      configure_projects_from_dir "$RC_FILE_SRC"
+    else
+      echo "$EXE: error: not a file or directory: $RC_FILE_SRC" >&2
+      exit 1
+    fi
+
+  elif [ ! -z "${OS_PROJECT_NAME+x}" ]; then
+    # Project OpenStack RC file already sourced
+
+    get_password
+    configure_project_sourced
+
+  else
+    # No project to configure
+    echo "$EXE: error: no project (use --rc or source an OpenStack RC file)" >&2
+    exit 1
+  fi
+
+  # Update log, if successfully updated at least one security group
+
+  if [ $NUM_GROUPS_UPDATED -gt 0 ]; then
+    ip_save_log
+  else
+    echo "$EXE: error: no security groups could be updated" >&2
+    exit 1
+  fi
+}
+
+main "$@"
 
 #EOF
