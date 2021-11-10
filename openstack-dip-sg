@@ -16,7 +16,7 @@
 #----------------------------------------------------------------
 
 PROGRAM=openstack-dip-sg
-VERSION=1.0.0
+VERSION=1.1.0
 
 EXE=$(basename "$0" .sh)
 EXE_EXT=$(basename "$0")
@@ -138,7 +138,7 @@ process_command_line() {
           echo "$EXE: usage error: missing argument for $1" >&2
           exit 2
         fi
-        OUT_FILE="$DEFAULT_OUT_FILE"
+        OUT_FILE="$2"
         shift
         ;;
 
@@ -360,9 +360,11 @@ set_rules() {
   local _OLD_ADDR=
   local _IDS=
 
+  local _ERRS="/tmp/$PROGRAM-$$.out"
+
   for ROW in $(openstack security group rule list "$SECURITY_GROUP_NAME" \
                          -f csv --quote minimal \
-                         -c 'ID' -c 'IP Range' -c 'Direction' 2>/dev/null); do
+                         -c 'ID' -c 'IP Range' -c 'Direction' 2>>"$_ERRS"); do
     local _ID
     local _ADDR
     local _DIR
@@ -398,6 +400,17 @@ set_rules() {
       fi
     fi
   done
+
+  # Detect authentication errors from stdout
+
+  if grep -qE 'HTTP 401' "$_ERRS"; then
+    rm "$_ERRS"
+    echo "$EXE: error: $OS_PROJECT_NAME: $OS_USERNAME: invalid password" >&2
+    exit 1
+  fi
+  rm "$_ERRS"
+
+  # Detect other problems
 
   if [ -z "$_FOUND_SG" ]; then
     echo "$EXE: warning: $OS_PROJECT_NAME: security group not found: \"$SECURITY_GROUP_NAME\"" >&2

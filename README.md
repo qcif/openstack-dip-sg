@@ -224,6 +224,11 @@ OpenStack to detect if it has changed.It compares the IP address with
 the previous IP address stored in the log file.  The log file can be
 changed with the `--log` option.
 
+If the utility is used to manage security groups in different projects
+with different ports, use a different log file for each. Otherwise,
+the first project will update the log file, and subsequent projects
+will not get updated (since the IP address would be the same).
+
 ### Forcing updates
 
 An update can be forced by using the `--force` option.
@@ -233,7 +238,6 @@ set of TCP/IP ports has changed since the last run. Otherwise, the
 results may be unexpected. For example, if the IP address has not
 changed and the utility is run with a new port number, a new rule will
 not be created unless the force option is used.
-
 
 ## Licence
 
