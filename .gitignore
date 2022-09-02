@@ -1,3 +1,13 @@
+# .gitignore
+
+# Temporary and operating system files
+
 *~
+.DS_Store
+
+# For any settings used with the script.
+
 *.password
+*-openrc.sh
 rc-files
+local

@@ -81,9 +81,9 @@ groups the utility is going to manage.
 
 These can be downloaded from the OpenStack Horizon Web dashboard.
 
-1. Select the project (from the top right of the page).
-2. Select Project > API Access (from the left navigation).
-3. Press the "Download OpenStack RC File" dropdown menu.
+1. Select the project (from the top left of the page).
+2. Select _Project > API Access_ (from the left navigation column).
+3. Press the "Download OpenStack RC File" dropdown menu (top right).
 4. Select "OpenStack RC File".
 
 ### Configure security groups
