@@ -119,6 +119,9 @@ details.
 * `-S | --stun SERVER` --- STUN server for detecting the public
   Internet IP address.
 
+* `-P | --stun-port PORT` --- port number of the STUN server:
+  useful if it is not running on the standard STUN port 3478.
+
 * `-l | --log FILE` --- log file for saving the most recent IP address
   that was used. Set to an empty string to disable this feature.
 
@@ -207,7 +210,7 @@ If it is not explicitly provided as a command line argument, the
 utility tries to use the public Internet address for the machine
 running the utility.  This detection is done using the _Session
 Traversal Utilities for NAT_ (STUN) protocol.  The STUN server can be
-set using the `--stun` option.
+set using the `--stun` and `--stun-port` options.
 
 If the value of "none" is used for the IP address, all the rules are
 deleted but no rules are created.
@@ -250,4 +253,3 @@ General Public License for more details.
 
 Please submit issues using the repository's [GitHub
 issues](https://github.com/qcif/openstack-dip-sg/issues)
-

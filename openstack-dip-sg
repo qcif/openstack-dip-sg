@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # OpenStack Dynamic IP security group updater.
 #
@@ -12,11 +12,11 @@
 #     pip3 install wheel
 #     pip3 install python-openstackclient
 #
-# Copyright (C) 2021, QCIF Ltd.
+# Copyright (C) 2021, 2023, QCIF Ltd.
 #----------------------------------------------------------------
 
 PROGRAM=openstack-dip-sg
-VERSION=1.1.0
+VERSION=1.2.0
 
 EXE=$(basename "$0" .sh)
 EXE_EXT=$(basename "$0")
@@ -38,8 +38,17 @@ DEFAULT_TCP_PORTS=SSH,HTTP,HTTPS
 # Output from running `openstack security group rule create` are written here
 DEFAULT_OUT_FILE=/dev/null
 
-# The STUN server to use. Change to a more local STUN server, if you have one.
-DEFAULT_STUN_SERVER=stun.stunprotocol.org
+# The STUN server to use, if one is not specified on the command line.
+# Change to a more local STUN server, if you have one.
+#
+# DEFAULT_STUN_SERVER=stun.stunprotocol.org # no longer works
+# DEFAULT_STUN_PORT=3478 # standard STUN port
+#
+# Found this STUN server from the list at
+# <https://gist.github.com/mondain/b0ec1cf5f60ae726202e>.
+
+DEFAULT_STUN_SERVER=stun.l.google.com
+DEFAULT_STUN_PORT=19302 # non-standard port for Google's STUN protocol
 
 #----------------
 # Log file.
@@ -93,8 +102,10 @@ TCP_PORTS=
 NO_ALL_ICMP=
 OUT_FILE=/dev/null
 FORCE=
-STUN_SERVER="$DEFAULT_STUN_SERVER"
+STUN_SERVER=$DEFAULT_STUN_SERVER
+STUN_PORT=$DEFAULT_STUN_PORT
 LOG_FILE="$DEFAULT_LOG_FILE"
+VERBOSE=
 IP_ADDRESS=
 
 process_command_line() {
@@ -164,6 +175,15 @@ process_command_line() {
         shift
         ;;
 
+      -P|--stun-port)
+        if [ $# -lt 2 ]; then
+          echo "$EXE: usage error: missing argument for $1" >&2
+          exit 2
+        fi
+        STUN_PORT="$2"
+        shift
+        ;;
+
       -l|--log)
         if [ $# -lt 2 ]; then
           echo "$EXE: usage error: missing argument for $1" >&2
@@ -175,6 +195,10 @@ process_command_line() {
 
       --no-all-icmp)
         NO_ALL_ICMP=yes
+        ;;
+
+      -v|--verbose)
+        VERBOSE=yes
         ;;
 
       --version)
@@ -221,7 +245,10 @@ Options:
      --no-all-icmp          do not add rule for All ICMP (default: add rule)
   -o|--output FILE          openstack output (default: $DEFAULT_OUT_FILE)
   -f|--force                replace rules when detected IP address is unchanged
+
   -S|--stun SERVER          STUN server (default: $DEFAULT_STUN_SERVER)
+  -P|--stun-port NUM        port for STUN server (default: $DEFAULT_STUN_PORT)
+
   -l|--log FILE             $LOG_HELP_TEXT
                             (default: $DEFAULT_LOG_FILE)
      --version              display version information and exit
@@ -269,6 +296,15 @@ EOF
     _PORTS="$DEFAULT_TCP_PORTS"
   fi
 
+  #----------------
+  # Check port number for the STUN server
+
+  if [ "$STUN_PORT" -le 0 ] || [ "$STUN_PORT" -gt 65535 ]; then
+    echo "$EXE: error: STUN server port out of range: $STUN_PORT" >&2
+    exit 1
+  fi
+
+  #----------------
   # Check values and convert to a list of integer port numbers
 
   TCP_PORTS=
@@ -317,14 +353,28 @@ EOF
       # http://www.stunprotocol.org
       # https://en.wikipedia.org/wiki/STUN
 
-      IP_ADDRESS=$(stunclient "$STUN_SERVER" \
+      if [ -n "$VERBOSE" ]; then
+        echo "$EXE: STUN service: $STUN_SERVER (port $STUN_PORT)"
+      fi
+
+      IP_ADDRESS=$(stunclient "$STUN_SERVER" $STUN_PORT \
                      | awk -F': *' '/^Mapped address:/{print $2}')
       FROM_STUN=yes
+
+      if [ -z "$IP_ADDRESS" ]; then
+        echo "$EXE: error: stunclient failed to detect the public IP address" >&2
+        echo "$EXE: please try another STUN server or explicitly provide" >&2
+        echo "$EXE: the public IP address as an argument." >&2
+        exit 1
+      fi
+
+      echo "$EXE: public IP address: $IP_ADDRESS"
 
     else
       # No IP address and cannot automatically determine it
       echo "$EXE: \"stunclient\" command not found <http://www.stunprotocol.org>" >&2
-      echo "$EXE: so an IP address must be provided (-h for help)" >&2
+      echo "$EXE: so cannot automatically determine public IP address" >&2
+      echo "$EXE: please explicitly provide an IP address (-h for help)" >&2
       exit 2
     fi
   fi
@@ -663,18 +713,20 @@ ip_save_log() {
 main() {
   process_command_line "$@"
 
+  # Check if update needs to be performed
+
+  if [ -z "$FORCE" ] && ! ip_has_changed; then
+    echo "$EXE: IP address unchanged ($IP_ADDRESS): no update required" >&2
+    echo "$EXE: (use -f to force an update, or delete the log file" >&2
+    echo "$EXE: \"$LOG_FILE\")" >&2
+    exit 0
+  fi
+
   # Check for openstack command line client
 
   if ! which openstack >/dev/null; then
     echo "$EXE: error: \"openstack\" command not found" >&2
     exit 1
-  fi
-
-  # Check if update needs to be performed
-
-  if [ -z "$FORCE" ] && ! ip_has_changed; then
-    echo "$EXE: IP address unchanged ($IP_ADDRESS): no update (-f to force)" >&2
-    exit 0
   fi
 
   # Process projects
